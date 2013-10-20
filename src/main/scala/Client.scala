@@ -1,73 +1,74 @@
-package irc
+package client
 
 import akka.io._ // IO, Tcp
 import akka.actor.{ IO => _, _ }
 import akka.util._ // ByteString
 import java.net._
 
-class Client() extends Actor {
+class Client() extends Actor with ActorLogging {
 
   import Tcp._ // WriteCommand, Write
   import context.system
 
-  /* IO(Tcp) == IO manager
-   * 
-   * The manager is an actor that handles the underlying low level I/O
-   * resources (selectors, channels) and instantiates workers for
-   * specific tasks, such as listening to incoming connections.
-   * 
-   * The first step of connecting to a remote address is sending a
-   * Connect message to the TCP manager; in addition to the simplest
-   * form shown above there is also the possibility to specify a local
-   * InetSocketAddress to bind to and a list of socket options to
-   * apply.
-   */
   val remote = new InetSocketAddress("www.w3.org", 80)
   IO(Tcp) ! Connect(remote)
 
   def receive = {
-    /* The TCP manager will then reply either with a CommandFailed...
-     */
     case CommandFailed(_: Connect) =>
       context stop self
  
-    /* ... or it will spawn an internal actor representing the new
-     * connection. This new actor will then send a Connected message
-     * to the original sender of the Connect message.
-     */
     case c @ Connected(remote, local) =>
-      /* The connection actor watches the registered handler and closes the
-       * connection when that one terminates, thereby cleaning up all
-       * internal resources associated with that connection.
-       */
       val connection = sender
 
-      /* In order to activate the new connection a Register message must be
-       * sent to the connection actor, informing that one about who
-       * shall receive data from the socket. Before this step is done
-       * the connection cannot be used, and there is an internal
-       * timeout after which the connection actor will shut itself
-       * down if no Register message is received.
-       */
-      connection ! Register(self)
+      val stage: PipelineStage[PipelineContext, String, Tcp.Command, String, Tcp.Event] =
+        /* Simple convenience pipeline stage for turning Strings into
+         * ByteStrings and vice versa.
+         */
+        new StringByteStringAdapter("utf-8") >>
+        /* Pipeline stage for delimiter byte based framing and
+         * de-framing. Useful for string oriented protocol using '\n'
+         * or 0 as delimiter values.
+         */
+        new DelimiterFraming(maxSize = 1024, delimiter = ByteString("\n"), includeDelimiter = false) >>
+        /* Adapts a ByteString oriented pipeline stage to a stage that
+         * communicates via Tcp Commands and Events. Every ByteString
+         * passed down to this stage will be converted to Tcp.Write
+         * commands, while incoming Tcp.Receive events will be
+         * unwrapped and their contents passed up as raw ByteStrings.
+         */
+        new TcpReadWriteAdapter
 
-      /* The simplest WriteCommand implementation which wraps a ByteString
-       * instance and an "ack" event. A ByteString (as explained in
-       * this section) models one or more chunks of immutable
-       * in-memory data with a maximum (total) size of 2 GB (2^31
-       * bytes).
+
+      /* This class wraps up a pipeline with its external (i.e. “top”)
+       * command and event types and providing unique wrappers for
+       * sending commands and receiving events (nested and non-static
+       * classes which are specific to each instance of Init). All
+       * events emitted by the pipeline will be sent to the registered
+       * handler wrapped in an Event.
        */
+      val init = TcpPipelineHandler.withLogger(log, stage)
+
+      /* This actor wraps a pipeline and forwards commands and events
+       * between that one and a Tcp connection actor. In order to
+       * inject commands into the pipeline send an
+       * TcpPipelineHandler.Init.Command message to this actor; events
+       * will be sent to the designated handler wrapped in
+       * TcpPipelineHandler.Init.Event messages.
+       * 
+       * When the designated handler terminates the TCP connection is
+       * aborted. When the connection actor terminates this actor terminates as
+       * well; the designated handler may want to watch this actor’s lifecycle.
+       */
+      val handler = context.actorOf(TcpPipelineHandler.props(init, connection, self))
+
+      connection ! Register(handler)
       connection ! Write(ByteString("GET / HTTP/1.0\r\n\r\n"))
 
-      /* The actor in the example uses become to switch from unconnected to
-       * connected operation, demonstrating the commands and events
-       * which are observed in that state.
-       */
       context become {
         case CommandFailed(w: Write) => // O/S buffer was full
 
-        case Received(data) =>
-          println(data.utf8String)
+        case init.Event(data) =>
+          println("@@@@ " + data)
 
         case _: ConnectionClosed => context.stop(self)
       }
@@ -79,7 +80,7 @@ class Client() extends Actor {
 object Main {
 
   def main(args: Array[String]): Unit = {
-    val system = ActorSystem("irc")
+    val system = ActorSystem("tcp")
     system.actorOf(Props(classOf[Client]))
     readLine()
     system.shutdown()
