@@ -1,0 +1,27 @@
+test.tdb
+target
+lib_managed
+src_managed
+lift_example
+projectboot
+.classpath
+.project
+.manager
+*~
+*.class
+*.log
+*\#*
+*.swp
+sbt-launch*.jar
+.scala_dependencies
+*.orig
+.cache
+.settings
+.idea
+.idea_modules
+bin
+.ensime
+.ensime_lucene
+*.egp
+
+# just for convenience
