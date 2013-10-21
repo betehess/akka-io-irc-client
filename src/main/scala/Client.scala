@@ -30,10 +30,14 @@ class Client() extends Actor with ActorLogging {
       val handler = context.actorOf(TcpPipelineHandler.props(init, connection, self))
 
       connection ! Register(handler)
-      connection ! Write(ByteString("PASS foobar\r\n"))
-      connection ! Write(ByteString("NICK client\r\n"))
-      connection ! Write(ByteString("USER client client ngircd.w3.org :Client\r\n"))
-      connection ! Write(ByteString("JOIN #scalaio\r\n"))
+
+      def send(msg: String): Unit =
+        connection ! Write(ByteString(s"$msg\r\n"))
+
+      send("PASS foobar")
+      send("NICK client")
+      send("USER client client ngircd.w3.org :Client")
+      send("JOIN #scalaio")
 
       /* see: http://mybuddymichael.com/writings/a-regular-expression-for-irc-messages.html
        *  :<prefix> <command> <params> :<trailing>
@@ -46,8 +50,8 @@ class Client() extends Actor with ActorLogging {
         // After <PingTimeout> seconds of inactivity the server will send a      
         // PING to the peer to test whether it is alive or not.
         case init.Event(r(null, "PING", null, message)) =>
-          println("@@ got PING $message")
-          connection ! Write(ByteString(s"PONG :$message\r\n"))
+          println(s"@@ got PING $message")
+          send(s"PONG :$message")
 
         case init.Event(data) =>
           println("<< " + data)
