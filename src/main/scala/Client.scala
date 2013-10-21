@@ -11,7 +11,7 @@ class Client() extends Actor with ActorLogging {
   import Tcp._ // WriteCommand, Write
   import context.system
 
-  val remote = new InetSocketAddress("tightlips.w3.org", 6667)
+  val remote = new InetSocketAddress("tightlips.w3.org", 6697)
   IO(Tcp) ! Connect(remote)
 
   val sslEngine: SSLEngine = {
@@ -38,7 +38,7 @@ class Client() extends Actor with ActorLogging {
       val stage =
         new StringByteStringAdapter("utf-8") >>
         new DelimiterFraming(maxSize = 1024, delimiter = ByteString("\r\n"), includeDelimiter = false) >>
-        new TcpReadWriteAdapter // @@ >> new SslTlsSupport(sslEngine)
+        new TcpReadWriteAdapter >> new SslTlsSupport(sslEngine)
 
       val init = TcpPipelineHandler.withLogger(log, stage)
 
@@ -46,13 +46,10 @@ class Client() extends Actor with ActorLogging {
 
       connection ! Register(handler)
 
-      def send(msg: String): Unit =
-        handler ! init.Command(s"$msg\r\n")
+      def send(msgs: String*): Unit =
+        handler ! init.Command(msgs.mkString("", "\r\n", "\r\n"))
 
-      send("PASS foobar")
-      send("NICK client")
-      send("USER client client ngircd.w3.org :Client")
-      send("JOIN #scalaio")
+      send("PASS foobar", "NICK client", "USER client client ngircd.w3.org :Client", "JOIN #scalaio")
 
       /* see: http://mybuddymichael.com/writings/a-regular-expression-for-irc-messages.html
        *  :<prefix> <command> <params> :<trailing>
