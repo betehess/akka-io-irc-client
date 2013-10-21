@@ -4,14 +4,29 @@ import akka.io._ // IO, Tcp
 import akka.actor.{ IO => _, _ }
 import akka.util._ // ByteString
 import java.net._
+import javax.net.ssl._
 
 class Client() extends Actor with ActorLogging {
 
   import Tcp._ // WriteCommand, Write
   import context.system
 
-  val remote = new InetSocketAddress("ngircd.w3.org", 6667)
+  val remote = new InetSocketAddress("tightlips.w3.org", 6667)
   IO(Tcp) ! Connect(remote)
+
+  val sslEngine: SSLEngine = {
+    val context = SSLContext.getInstance("TLSv1.1")
+    val trustManagers: Array[TrustManager] = Array(new X509TrustManager {
+      import java.security.cert.X509Certificate
+      def checkClientTrusted(arg0: Array[X509Certificate], arg1: String): Unit = ()
+      def checkServerTrusted(arg0: Array[X509Certificate], arg1: String): Unit = ()
+      def getAcceptedIssuers(): Array[X509Certificate] = Array()
+    })
+    context.init(null, trustManagers, null)
+    val engine = context.createSSLEngine(remote.getHostName, remote.getPort)
+    engine.setUseClientMode(true)
+    engine
+  }
 
   def receive = {
     case CommandFailed(_: Connect) =>
@@ -20,10 +35,10 @@ class Client() extends Actor with ActorLogging {
     case c @ Connected(remote, local) =>
       val connection = sender
 
-      val stage: PipelineStage[PipelineContext, String, Tcp.Command, String, Tcp.Event] =
+      val stage =
         new StringByteStringAdapter("utf-8") >>
         new DelimiterFraming(maxSize = 1024, delimiter = ByteString("\r\n"), includeDelimiter = false) >>
-        new TcpReadWriteAdapter
+        new TcpReadWriteAdapter // @@ >> new SslTlsSupport(sslEngine)
 
       val init = TcpPipelineHandler.withLogger(log, stage)
 
@@ -32,7 +47,7 @@ class Client() extends Actor with ActorLogging {
       connection ! Register(handler)
 
       def send(msg: String): Unit =
-        connection ! Write(ByteString(s"$msg\r\n"))
+        handler ! init.Command(s"$msg\r\n")
 
       send("PASS foobar")
       send("NICK client")
