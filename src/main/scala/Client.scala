@@ -53,6 +53,11 @@ class Client() extends Actor with ActorLogging {
           println(s"@@ got PING $message")
           send(s"PONG :$message")
 
+        case init.Event(e@r(_, "INVITE", params, _)) =>
+          println(s"@@ $e")
+          val Array(nickname, channel) = params.split(" ")
+          send(s"JOIN $channel")
+
         case init.Event(data) =>
           println("<< " + data)
 
