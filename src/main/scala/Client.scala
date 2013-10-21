@@ -35,8 +35,19 @@ class Client() extends Actor with ActorLogging {
       connection ! Write(ByteString("USER client client ngircd.w3.org :Client\r\n"))
       connection ! Write(ByteString("JOIN #scalaio\r\n"))
 
+      /* see: http://mybuddymichael.com/writings/a-regular-expression-for-irc-messages.html
+       *  :<prefix> <command> <params> :<trailing>
+       */
+      val r = """^(?:[:](\S+) )?(\S+)(?: (?!:)(.+?))?(?: [:](.+))?$""".r
+
       context become {
         case CommandFailed(w: Write) => // O/S buffer was full
+
+        // After <PingTimeout> seconds of inactivity the server will send a      
+        // PING to the peer to test whether it is alive or not.
+        case init.Event(r(null, "PING", null, message)) =>
+          println("@@ got PING $message")
+          connection ! Write(ByteString(s"PONG :$message\r\n"))
 
         case init.Event(data) =>
           println("<< " + data)
